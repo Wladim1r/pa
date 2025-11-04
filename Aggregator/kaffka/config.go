@@ -18,7 +18,7 @@ type kafkaConfig struct {
 
 func LoadKafkaConfig() kafkaConfig {
 	return kafkaConfig{
-		Brockers:     getenv.GetSlice("BROKERS", []string{"localhost:9091"}),
+		Brockers:     getenv.GetSlice("BROKERS", []string{"localhost:9092"}),
 		Topic:        getenv.GetString("TOPIC", "binance.miniticker"),
 		BatchSize:    getenv.GetInt("BATCH_SIZE", 120),
 		BatchTimeOut: getenv.GetTime("BATCH_TIMEOUT", 2*time.Second),
