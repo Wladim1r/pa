@@ -101,6 +101,27 @@ services:
     networks:
       - crypto-network
 
+  kafka-clickhouse:
+    build: ./Kafka-Clickhouse/
+    container_name: kafka-clickhouse
+    restart: on-failure:5
+    depends_on:
+      aggregator-service:
+        condition: service_started
+    ports:
+      - "50071:50071"
+    environment:
+      # Kafka settings
+      KAFKA_BROKERS: "kafka:9092"
+      KAFKA_TOPIC: "binance.miniticker"
+      KAFKA_GROUP_ID: "clickhouse-consumer-group"
+      KAFKA_MAX_RETRIES: "5"
+      KAFKA_RETRY_DELAY: "2s"
+      KAFKA_SESSION_TIMEOUT: "10s"
+      KAFKA_HEARTBEAT_INTERVAL: "3s"
+    networks:
+      - crypto-network
+
 volumes:
   kafka-data:
 
