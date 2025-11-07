@@ -17,11 +17,6 @@ type producer struct {
 	config      kafkaConfig
 	batchBuffer []*models.KafkaMsg
 	batchTimer  *time.Timer
-
-	// metrics
-	messagesSent   int64
-	messagesFailed int64
-	batchesSent    int64
 }
 
 func NewProducer(cfg kafkaConfig) *producer {
@@ -181,20 +176,14 @@ func (p *producer) sendToKafka(ctx context.Context) {
 	finish := time.Since(start)
 
 	if err != nil {
-		p.messagesFailed += int64(len(arrMsgs))
-		slog.Error("Failed to send batch to Kafka",
+		slog.Error("❌ Failed to send batch to Kafka",
 			"error", err,
 			"time_sending", finish,
-			"batch_size", len(arrMsgs),
-			"total_failed", p.messagesFailed)
+			"batch_size", len(arrMsgs))
 	} else {
-		p.messagesSent += int64(len(arrMsgs))
-		p.batchesSent++
 		slog.Info("✅ Sent batch to Kafka",
 			"time_sending", finish,
-			"batch_size", len(arrMsgs),
-			"total_sent", p.messagesSent,
-			"batches_sent", p.batchesSent)
+			"batch_size", len(arrMsgs))
 	}
 
 	p.batchBuffer = p.batchBuffer[:0]

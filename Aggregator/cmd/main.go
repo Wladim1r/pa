@@ -32,19 +32,6 @@ func main() {
 	go converting.ReceiveKafkaMsg(ctx, wg, dailyStatChan, kafkaMsgChan)
 	go producer.Start(ctx, wg, kafkaMsgChan)
 
-	// go func(ctx context.Context, wg *sync.WaitGroup) {
-	// 	defer wg.Done()
-	//
-	// 	for {
-	// 		select {
-	// 		case <-ctx.Done():
-	// 			return
-	// 		case msg := <-kafkaMsgChan:
-	// 			fmt.Println(msg)
-	// 		}
-	// 	}
-	// }(ctx, wg)
-
 	<-c
 	cancel()
 	slog.Info("👾 Received Interruption signal")
