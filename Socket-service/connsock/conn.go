@@ -11,8 +11,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	AggTradeURL    = "wss://stream.binance.com:443/ws/"
+	EvTypeAggTrade = "@aggTrade"
+	MiniTickerURL  = "wss://stream.binance.com:443/ws/!miniTicker@arr"
+	Port           = ":50051"
+)
+
 type socketProducer struct {
-	outputChan chan<- []byte
+	outputChan chan []byte
 
 	// connection data
 	urlConnection string

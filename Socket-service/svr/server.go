@@ -6,32 +6,39 @@ import (
 	"net"
 	"sync"
 
-	"github.com/Wladim1r/proto-crypto/gen/socket"
+	"github.com/Wladim1r/proto-crypto/gen/socket-aggregator"
 	"google.golang.org/grpc"
 )
 
 const (
-	port = "0.0.0.0:50051"
+	Address = "0.0.0.0:50051"
 )
+
+type ConnectionManager interface {
+	GetOrCreateConnection(symbol string) <-chan []byte
+	GetMiniTickerConnection() <-chan []byte
+}
 
 type server struct {
 	socket.UnimplementedSocketServiceServer
-	outputChan <-chan []byte
-	mainCtx    context.Context
+	connManager ConnectionManager
+	mainCtx     context.Context
 }
 
-func register(gRPC *grpc.Server, outChan chan []byte, ctx context.Context) {
+func register(gRPC *grpc.Server, connManager ConnectionManager, ctx context.Context) {
 	socket.RegisterSocketServiceServer(gRPC, &server{
-		outputChan: outChan,
-		mainCtx:    ctx,
+		connManager: connManager,
+		mainCtx:     ctx,
 	})
 }
 
-func (s *server) ReceiveRawMsg(
-	req *socket.RawMsgRequest,
-	stream socket.SocketService_ReceiveRawMsgServer,
+func (s *server) ReceiveRawMiniTicker(
+	req *socket.RawMiniTickerRequest,
+	stream socket.SocketService_ReceiveRawMiniTickerServer,
 ) error {
-	slog.Info("Client connected to ReceiveRawMsg stream")
+	slog.Info("Client connected to ReceiveRawMiniTicker stream")
+
+	outputChan := s.connManager.GetMiniTickerConnection()
 
 	for {
 		select {
@@ -41,23 +48,61 @@ func (s *server) ReceiveRawMsg(
 		case <-s.mainCtx.Done():
 			slog.Info("Got Interruption signal from streaming server from main context")
 			return stream.Context().Err()
-		case msg, ok := <-s.outputChan:
+		case msg, ok := <-outputChan:
 			if !ok {
 				slog.Warn("Output chan closed")
 				return nil
 			}
-			if err := stream.Send(&socket.RawMsgResponse{Data: msg}); err != nil {
-				slog.Error("Could not send raw message to client", "error", err)
+			if err := stream.Send(&socket.RawResponse{Data: msg}); err != nil {
+				slog.Error(
+					"Could not send raw message from miniTicker stream to client",
+					"error",
+					err,
+				)
 				return err
 			}
 		}
 	}
 }
 
-func StartServer(wg *sync.WaitGroup, outputChan chan []byte, ctx context.Context) {
+func (s *server) ReceiveRawAggTrade(
+	req *socket.RawAggTradeRequest,
+	stream socket.SocketService_ReceiveRawAggTradeServer,
+) error {
+	slog.Info("Client connected to ReceiveRawMiniTicker stream")
+
+	symbol := req.Symbol
+	outputChan := s.connManager.GetOrCreateConnection(symbol)
+
+	for {
+		select {
+		case <-stream.Context().Done():
+			slog.Warn("Got Interruption signal from streaming server from stream context")
+			return stream.Context().Err()
+		case <-s.mainCtx.Done():
+			slog.Info("Got Interruption signal from streaming server from main context")
+			return stream.Context().Err()
+		case msg, ok := <-outputChan:
+			if !ok {
+				slog.Warn("Output chan closed")
+				return nil
+			}
+			if err := stream.Send(&socket.RawResponse{Data: msg}); err != nil {
+				slog.Error(
+					"Could not send raw message from aggTrade stream to clietn",
+					"error",
+					err,
+				)
+				return err
+			}
+		}
+	}
+}
+
+func StartServer(wg *sync.WaitGroup, connManager ConnectionManager, ctx context.Context) {
 	defer wg.Done()
 
-	listen, err := net.Listen("tcp", port)
+	listen, err := net.Listen("tcp", Address)
 	if err != nil {
 		slog.Error("Could not listening connection", "error", err)
 		return
@@ -65,9 +110,9 @@ func StartServer(wg *sync.WaitGroup, outputChan chan []byte, ctx context.Context
 
 	svr := grpc.NewServer()
 
-	register(svr, outputChan, ctx)
+	register(svr, connManager, ctx)
 
-	slog.Info("👂 Server listening", "port", port)
+	slog.Info("👂 Server listening", "address", Address)
 
 	go func() {
 		if err := svr.Serve(listen); err != nil {
