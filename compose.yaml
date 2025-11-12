@@ -16,6 +16,28 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    volumes:
+      - redis-data:/data
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   kafka:
     hostname: kafka
     image: bitnamilegacy/kafka:2.7.0
@@ -120,6 +142,34 @@ services:
       timeout: 3s
       retries: 5
 
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: "local:redis:6379"
+      HTTP_USER: admin
+      HTTP_PASSWORD: admin
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - crypto-network
+
+  tabix:
+    image: spoonest/clickhouse-tabix-web-client:latest
+    container_name: tabix
+    restart: always
+    ports:
+      - "8082:80"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - crypto-network
+
   socket-service:
     build: ./Socket-service/
     container_name: socket-service
@@ -138,9 +188,13 @@ services:
         condition: service_completed_successfully
       socket-service:
         condition: service_started
+      redis:
+        condition: service_healthy
     ports:
       - "50061:50061"
+      - "8088:8088"
     environment:
+      # Kafka settings
       BROKERS: "kafka:9092"
       TOPIC: "binance.miniticker"
       BATCH_SIZE: "120"
@@ -148,6 +202,15 @@ services:
       ACK: "1"
       MAX_ATTEMPTS: "3"
       WRITE_TIMEOUT: "30s"
+
+      # Redis settings
+      REDIS_ADDR: "redis:6379"
+      REDIS_PWD: ""
+      REDIS_DB: "0"
+      REDIS_MAX_RETRIES: "10"
+      REDIS_TTL: "30s"
+      REDIS_RETRY_DELAY: "2s"
+      REDIS_PING_TIMEOUT: "5s"
     networks:
       - crypto-network
 
@@ -188,6 +251,7 @@ services:
 
 volumes:
   kafka-data:
+  redis-data:
   clickhouse-data:
 
 networks:
