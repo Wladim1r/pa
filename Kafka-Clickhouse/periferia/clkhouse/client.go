@@ -7,15 +7,14 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
-	"github.com/Wladim1r/kafclick/cfg"
 )
 
 type Client struct {
 	conn driver.Conn
-	cfg  cfg.ClickHouseConfig
+	cfg  ClickHouseConfig
 }
 
-func NewClient(ctx context.Context, cfg cfg.ClickHouseConfig) *Client {
+func NewClient(ctx context.Context, cfg ClickHouseConfig) *Client {
 	slog.Debug("Set up connection to ClickHouse",
 		"address", cfg.Addr,
 		"database", cfg.Database,
@@ -49,7 +48,7 @@ func NewClient(ctx context.Context, cfg cfg.ClickHouseConfig) *Client {
 		if err == nil {
 			if err = conn.Ping(clientCtx); err == nil {
 				cancel()
-				slog.Info("🥷 Connection to ClickHouse successdully")
+				slog.Info("🥷 Connection to ClickHouse successfully")
 				return &Client{
 					conn: conn,
 					cfg:  cfg,

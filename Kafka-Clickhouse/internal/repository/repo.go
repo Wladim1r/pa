@@ -7,20 +7,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wladim1r/kafclick/cfg"
-	"github.com/Wladim1r/kafclick/clkhouse"
 	"github.com/Wladim1r/kafclick/models"
+	"github.com/Wladim1r/kafclick/periferia/clkhouse"
 )
 
 type Repository struct {
 	client      *clkhouse.Client
-	cfg         cfg.ClickHouseConfig
+	cfg         clkhouse.ClickHouseConfig
 	batchBuffer []models.KafkaMsg
 	batchTimer  *time.Timer
 	mu          sync.Mutex
 }
 
-func NewRepository(client *clkhouse.Client, cfg cfg.ClickHouseConfig) *Repository {
+func NewRepository(client *clkhouse.Client, cfg clkhouse.ClickHouseConfig) *Repository {
 	return &Repository{
 		client:      client,
 		cfg:         cfg,
@@ -83,7 +82,7 @@ func (r *Repository) BatchInsert(
 
 		case <-r.batchTimer.C:
 			r.insertRemainingMsgs(ctx)
-			return
+			r.batchTimer.Reset(r.cfg.BatchTimeout)
 
 		case msg, ok := <-inputChan:
 			if !ok {

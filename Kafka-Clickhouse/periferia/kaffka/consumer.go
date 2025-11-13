@@ -7,17 +7,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Wladim1r/kafclick/cfg"
 	"github.com/Wladim1r/kafclick/models"
 	"github.com/segmentio/kafka-go"
 )
 
 type consumer struct {
 	reader *kafka.Reader
-	config cfg.KafkaConfig
+	config kafkaConfig
 }
 
-func NewConsumer(ctx context.Context, cfg cfg.KafkaConfig) *consumer {
+func NewConsumer(ctx context.Context, cfg kafkaConfig) *consumer {
 	slog.Info("Start initializing consumer",
 		"brockers", cfg.Brokers,
 		"topic", cfg.Topic,

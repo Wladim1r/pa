@@ -7,11 +7,10 @@ import (
 	"os/signal"
 	"sync"
 
-	"github.com/Wladim1r/kafclick/cfg"
-	"github.com/Wladim1r/kafclick/clkhouse"
 	"github.com/Wladim1r/kafclick/internal/repository"
-	"github.com/Wladim1r/kafclick/kaffka"
 	"github.com/Wladim1r/kafclick/models"
+	"github.com/Wladim1r/kafclick/periferia/clkhouse"
+	"github.com/Wladim1r/kafclick/periferia/kaffka"
 )
 
 func main() {
@@ -23,12 +22,13 @@ func main() {
 
 	wg := new(sync.WaitGroup)
 
-	cfg := cfg.Load()
+	clickHouseCfg := clkhouse.LoadClickHouseConfig()
+	kafkaCfg := kaffka.LoadKafkaConfig()
 
-	chClient := clkhouse.NewClient(ctx, cfg.ClickHouse)
+	chClient := clkhouse.NewClient(ctx, clickHouseCfg)
 	defer chClient.Close()
 
-	repo := repository.NewRepository(chClient, cfg.ClickHouse)
+	repo := repository.NewRepository(chClient, clickHouseCfg)
 
 	if err := repo.CreateTable(ctx); err != nil {
 		slog.Error("Failed to create table", "error", err)
@@ -37,7 +37,7 @@ func main() {
 
 	kafkaMsgs := make(chan models.KafkaMsg, 500)
 
-	cons := kaffka.NewConsumer(ctx, cfg.Kafka)
+	cons := kaffka.NewConsumer(ctx, kafkaCfg)
 
 	wg.Add(3)
 	go cons.Start(ctx, wg, kafkaMsgs)
