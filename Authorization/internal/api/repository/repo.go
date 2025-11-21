@@ -2,7 +2,13 @@
 package repository
 
 import (
-	"database/sql"
+	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/Wladim1r/auth/internal/models"
+	"github.com/Wladim1r/auth/lib/errs"
+	"gorm.io/gorm"
 )
 
 type UsersDB interface {
@@ -10,64 +16,106 @@ type UsersDB interface {
 	CreateUser(name string, password []byte) error
 	DeleteUser(name string) error
 	SelectPwdByName(name string) (string, error)
-	SelectIDByName(name string) *sql.Row
-	Close()
+	CheckUserExists(name string) error
 }
 
 type usersDB struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewRepository(db *sql.DB) UsersDB {
+func NewRepository(db *gorm.DB) UsersDB {
 	return &usersDB{
 		db: db,
 	}
 }
 
 func (db *usersDB) CreateTable() error {
-	_, err := db.db.Exec(
-		"CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, password TEXT)",
-	)
-	if err != nil {
-		return err
+
+	// create table
+	if err := db.db.Migrator().CreateTable(&models.User{}); err != nil {
+		slog.Error("Could not create db table", "error", err.Error())
+		os.Exit(1)
+	}
+
+	// check table exists or not
+	if ok := db.db.Migrator().HasTable(&models.User{}); !ok {
+		slog.Error("Table has not created idk")
+		os.Exit(1)
+	}
+
+	if ok := db.db.Migrator().HasTable("users"); !ok {
+		slog.Error("Table has not created idk")
+		os.Exit(1)
 	}
 
 	return nil
 }
 
 func (db *usersDB) CreateUser(name string, password []byte) error {
-	_, err := db.db.Exec("INSERT INTO users (name, password) VALUES (?, ?)", name, password)
-	if err != nil {
-		return err
+	user := models.User{
+		Name:     name,
+		Password: string(password),
+	}
+
+	result := db.db.Create(&user)
+
+	if result.RowsAffected == 0 {
+		return errs.ErrRecordingWNC
+	}
+
+	if result.Error != nil {
+		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
 	}
 
 	return nil
 }
 
 func (db *usersDB) DeleteUser(name string) error {
-	_, err := db.db.Exec("DELETE FROM users WHERE name = ?", name)
-	if err != nil {
-		return err
+	result := db.db.Where("name = ?", name).Delete(&models.User{})
+
+	if result.RowsAffected == 0 {
+		return errs.ErrRecordingWND
+	}
+
+	if result.Error != nil {
+		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
 	}
 
 	return nil
 }
 
 func (db *usersDB) SelectPwdByName(name string) (string, error) {
-	row := db.db.QueryRow("SELECT password FROM users WHERE name = ?", name)
+	var user models.User
 
-	var password string
-	if err := row.Scan(&password); err != nil {
-		return "", err
+	result := db.db.Table("users").Select("password").Where("name = ?", name).Scan(&user)
+
+	if result.RowsAffected == 0 {
+		return "", errs.ErrRecordingWNF
 	}
 
-	return password, nil
+	if result.Error != nil {
+		return "", fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+	}
+
+	return user.Password, nil
 }
 
-func (db *usersDB) SelectIDByName(name string) *sql.Row {
-	return db.db.QueryRow("SELECT id FROM users WHERE name = ?", name)
+func (db *usersDB) CheckUserExists(name string) error {
+	var user models.User
+
+	result := db.db.Table("users").Select("id").Where("name = ?", name).Scan(&user)
+
+	if result.RowsAffected == 0 {
+		return errs.ErrRecordingWNF
+	}
+
+	if result.Error != nil {
+		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
+	}
+
+	return nil
 }
 
-func (db *usersDB) Close() {
-	db.db.Close()
-}
+// func (db *usersDB) Close() {
+// 	db.db.Close()
+// }

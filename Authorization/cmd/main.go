@@ -10,8 +10,8 @@ import (
 
 	hand "github.com/Wladim1r/auth/internal/api/handlers"
 	repo "github.com/Wladim1r/auth/internal/api/repository"
-	"github.com/Wladim1r/auth/internal/db"
 	"github.com/Wladim1r/auth/lib/midware"
+	"github.com/Wladim1r/auth/periferia/db"
 	"github.com/Wladim1r/auth/periferia/reddis"
 
 	"github.com/gin-gonic/gin"
@@ -33,7 +33,6 @@ func main() {
 		slog.Error("Could not create table", "error", err)
 		os.Exit(1)
 	}
-	defer repo.Close()
 
 	hand := hand.NewHandler(ctx, repo, rdb)
 

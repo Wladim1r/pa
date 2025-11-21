@@ -3,12 +3,13 @@ package midware
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"net"
 	"net/http"
 
 	repo "github.com/Wladim1r/auth/internal/api/repository"
 	"github.com/Wladim1r/auth/internal/models"
+	"github.com/Wladim1r/auth/lib/errs"
 	"github.com/Wladim1r/auth/periferia/reddis"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -26,7 +27,6 @@ func CheckCookie(ctx context.Context, rdb *reddis.RDB) gin.HandlerFunc {
 			return
 		}
 
-		// name, ok := reddis.TokensDB[token]
 		name, err := rdb.Receive(ctx, token)
 		if err != nil {
 			if err == redis.Nil {
@@ -68,19 +68,20 @@ func CheckUserExists(db repo.UsersDB) gin.HandlerFunc {
 
 		password, err := db.SelectPwdByName(req.Name)
 		if err != nil {
-			if err == sql.ErrNoRows {
+			switch {
+			case errors.Is(err, errs.ErrRecordingWNF):
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"message": "user does not registered ❌",
 				})
 				c.Abort()
 				return
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "db error: " + err.Error(),
+				})
+				c.Abort()
+				return
 			}
-
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "db error: " + err.Error(),
-			})
-			c.Abort()
-			return
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(password), []byte(req.Password)); err != nil {

@@ -1,4 +1,24 @@
 services:
+  postgres:
+    image: postgres:15
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: users
+    volumes:
+      - postgres-data:/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - crypto-network
+
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -44,6 +64,8 @@ services:
     container_name: auth-service
     restart: on-failure:5
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     ports:
@@ -52,6 +74,7 @@ services:
       - crypto-network
 
 volumes:
+  postgres-data:
   redis-data:
 
 networks:

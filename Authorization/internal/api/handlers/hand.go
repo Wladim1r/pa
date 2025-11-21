@@ -4,14 +4,15 @@ package handlers
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	repo "github.com/Wladim1r/auth/internal/api/repository"
 	"github.com/Wladim1r/auth/internal/models"
+	"github.com/Wladim1r/auth/lib/errs"
 	"github.com/Wladim1r/auth/lib/hashpwd"
 	"github.com/Wladim1r/auth/periferia/reddis"
 	"github.com/gin-gonic/gin"
@@ -40,13 +41,11 @@ func (h *handler) Registration(c *gin.Context) {
 		return
 	}
 
-	row := h.repo.SelectIDByName(req.Name)
-
-	var id int
-	err := row.Scan(&id)
+	err := h.repo.CheckUserExists(req.Name)
 
 	if err != nil {
-		if err == sql.ErrNoRows {
+		switch {
+		case errors.Is(err, errs.ErrRecordingWNF):
 			hashPwd, err := hashpwd.HashPwd(h.repo, []byte(req.Password), req.Name)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{
@@ -57,22 +56,31 @@ func (h *handler) Registration(c *gin.Context) {
 
 			err = h.repo.CreateUser(req.Name, hashPwd)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"Could not create user": err.Error(),
-				})
-				return
-			}
+				switch {
+				case errors.Is(err, errs.ErrRecordingWNC):
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"Could not create user rawsAffected=0": err.Error(),
+					})
+					return
 
+				default:
+					c.JSON(http.StatusInternalServerError, gin.H{
+						"Could not create user": err.Error(),
+					})
+					return
+				}
+			}
 			c.JSON(http.StatusCreated, gin.H{
 				"message": "user successful created 🎊🤩",
 			})
 			return
-		}
 
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "db error: " + err.Error(),
-		})
-		return
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "db error: " + err.Error(),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusConflict, gin.H{
@@ -90,7 +98,6 @@ func (h *handler) Login(c *gin.Context) {
 	rand.Read(key)
 	token := hex.EncodeToString(key)
 
-	// reddis.TokensDB[token] = name
 	h.rdb.Record(h.ctx, token, name, 80*time.Second)
 
 	c.SetCookie("token", token, 80, "/", "localhost", false, true)
@@ -109,7 +116,6 @@ func (h *handler) Logout(c *gin.Context) {
 		return
 	}
 
-	// delete(reddis.TokensDB, token)
 	h.rdb.Delete(h.ctx, token)
 
 	c.SetCookie("token", "", -1, "/", "localhost", false, true)
@@ -131,13 +137,21 @@ func (h *handler) Delacc(c *gin.Context) {
 
 	err := h.repo.DeleteUser(name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "❌🗑️ Could not delete user: " + err.Error(),
-		})
-		return
+		switch {
+		case errors.Is(err, errs.ErrRecordingWND):
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"Could not create user rawsAffected=0": err.Error(),
+			})
+			return
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "❌🗑️ Could not delete user: " + err.Error(),
+			})
+			return
+		}
 	}
 
-	// delete(reddis.TokensDB, token)
 	h.rdb.Delete(h.ctx, token)
 	c.SetCookie("token", "", -1, "/", "localhost", false, true)
 
