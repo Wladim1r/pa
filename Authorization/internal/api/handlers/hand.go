@@ -2,11 +2,13 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"time"
 
 	repo "github.com/Wladim1r/auth/internal/api/repository"
 	"github.com/Wladim1r/auth/internal/models"
@@ -16,12 +18,16 @@ import (
 )
 
 type handler struct {
+	ctx  context.Context
 	repo repo.UsersDB
+	rdb  *reddis.RDB
 }
 
-func NewHandler(repo repo.UsersDB) *handler {
+func NewHandler(ctx context.Context, repo repo.UsersDB, rdb *reddis.RDB) *handler {
 	return &handler{
+		ctx:  ctx,
 		repo: repo,
+		rdb:  rdb,
 	}
 }
 
@@ -84,7 +90,8 @@ func (h *handler) Login(c *gin.Context) {
 	rand.Read(key)
 	token := hex.EncodeToString(key)
 
-	reddis.TokensDB[token] = name
+	// reddis.TokensDB[token] = name
+	h.rdb.Record(h.ctx, token, name, 80*time.Second)
 
 	c.SetCookie("token", token, 80, "/", "localhost", false, true)
 	c.JSON(http.StatusOK, "Login success!🫦")
@@ -102,7 +109,8 @@ func (h *handler) Logout(c *gin.Context) {
 		return
 	}
 
-	delete(reddis.TokensDB, token)
+	// delete(reddis.TokensDB, token)
+	h.rdb.Delete(h.ctx, token)
 
 	c.SetCookie("token", "", -1, "/", "localhost", false, true)
 	c.JSON(http.StatusOK, gin.H{
@@ -129,7 +137,8 @@ func (h *handler) Delacc(c *gin.Context) {
 		return
 	}
 
-	delete(reddis.TokensDB, token)
+	// delete(reddis.TokensDB, token)
+	h.rdb.Delete(h.ctx, token)
 	c.SetCookie("token", "", -1, "/", "localhost", false, true)
 
 	c.JSON(http.StatusOK, gin.H{

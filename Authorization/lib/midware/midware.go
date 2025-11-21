@@ -2,17 +2,20 @@
 package midware
 
 import (
+	"context"
 	"database/sql"
+	"net"
 	"net/http"
 
 	repo "github.com/Wladim1r/auth/internal/api/repository"
 	"github.com/Wladim1r/auth/internal/models"
 	"github.com/Wladim1r/auth/periferia/reddis"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func CheckCookie() gin.HandlerFunc {
+func CheckCookie(ctx context.Context, rdb *reddis.RDB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token, err := c.Cookie("token")
 		if err != nil {
@@ -23,11 +26,25 @@ func CheckCookie() gin.HandlerFunc {
 			return
 		}
 
-		name, ok := reddis.TokensDB[token]
-		if !ok {
-			c.JSON(http.StatusConflict, gin.H{
-				"error": "invalid cookie",
-			})
+		// name, ok := reddis.TokensDB[token]
+		name, err := rdb.Receive(ctx, token)
+		if err != nil {
+			if err == redis.Nil {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": "cookie not found",
+				})
+			}
+			if _, ok := err.(net.Error); ok {
+				// Network error, use fallback
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "error on the server side: " + err.Error(),
+				})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "invalid cookie",
+				})
+			}
+
 			c.Abort()
 			return
 		}
