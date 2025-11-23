@@ -267,6 +267,22 @@ services:
     networks:
       - crypto-network
 
+  clickhouse-dashboard:
+    build: ./ClickHouse-Dashboard/
+    # env_file:
+    #     - ./Redis-Dashboard/.env
+    container_name: clickhouse-dashboard
+    restart: on-failure:5
+    ports:
+      - "8083:8083"
+    environment:
+      CLICKHOUSE_ADDR: "clickhouse:9000"
+    depends_on:
+      kafka-clickhouse:
+        condition: service_started
+    networks:
+      - crypto-network
+
 volumes:
   kafka-data:
   redis-data:
