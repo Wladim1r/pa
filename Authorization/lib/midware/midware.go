@@ -2,55 +2,88 @@
 package midware
 
 import (
-	"context"
 	"errors"
-	"net"
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	repo "github.com/Wladim1r/auth/internal/api/repository"
 	"github.com/Wladim1r/auth/internal/models"
 	"github.com/Wladim1r/auth/lib/errs"
-	"github.com/Wladim1r/auth/periferia/reddis"
+	"github.com/Wladim1r/auth/lib/getenv"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func CheckCookie(ctx context.Context, rdb *reddis.RDB) gin.HandlerFunc {
+func verifyToken(c *gin.Context, token string) error {
+	jwtToken, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
+		return []byte(getenv.GetString("SECRET_KEY", "default_secret_key")), nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to parse token: %w", err)
+	}
+	if !jwtToken.Valid {
+		return fmt.Errorf("token is not valid")
+	}
+
+	claims, ok := jwtToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return fmt.Errorf("could not parse jwtToken into MapClaims struct")
+	}
+
+	expRaw, ok := claims["exp"]
+	if !ok {
+		return fmt.Errorf("field 'expiration' did not found")
+	}
+	exp64, ok := expRaw.(float64)
+	if !ok {
+		return fmt.Errorf("failed to parse expRaw into int64")
+	}
+	exp := int64(exp64)
+
+	if time.Now().Unix() > exp {
+		return fmt.Errorf("token life time has expired")
+	}
+
+	nameRaw, ok := claims["sub"]
+	if !ok {
+		return fmt.Errorf("field 'username' did not found")
+	}
+	name, ok := nameRaw.(string)
+	if !ok {
+		return fmt.Errorf("failed to parse nameRaw into string")
+	}
+
+	c.Set("username", name)
+	return nil
+}
+
+func CheckAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token, err := c.Cookie("token")
-		if err != nil {
+		authHeadVal := c.GetHeader("Authorization")
+		if authHeadVal == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})
+			c.Abort()
+			return
+		}
+
+		bearerToken := strings.Split(authHeadVal, " ")
+		if len(bearerToken) != 2 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token format"})
+			c.Abort()
+			return
+		}
+
+		if err := verifyToken(c, bearerToken[1]); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"no cookie": err.Error(),
+				"error": err.Error(),
 			})
 			c.Abort()
 			return
 		}
 
-		name, err := rdb.Receive(ctx, token)
-		if err != nil {
-			if err == redis.Nil {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": "cookie not found",
-				})
-			}
-			if _, ok := err.(net.Error); ok {
-				// Network error, use fallback
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "error on the server side: " + err.Error(),
-				})
-			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "invalid cookie",
-				})
-			}
-
-			c.Abort()
-			return
-		}
-
-		c.Set("token", token)
-		c.Set("username", name)
 		c.Next()
 	}
 }

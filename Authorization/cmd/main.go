@@ -14,14 +14,13 @@ import (
 	"github.com/Wladim1r/auth/lib/getenv"
 	"github.com/Wladim1r/auth/lib/midware"
 	"github.com/Wladim1r/auth/periferia/db"
-	"github.com/Wladim1r/auth/periferia/reddis"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	db := db.MustLoad()
-	rdb := reddis.NewClient()
+	// rdb := reddis.NewClient()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -37,7 +36,7 @@ func main() {
 	}
 
 	serv := serv.NewService(repo)
-	hand := hand.NewHandler(ctx, serv, rdb)
+	hand := hand.NewHandler(ctx, serv)
 
 	r := gin.Default()
 
@@ -45,10 +44,10 @@ func main() {
 	r.POST("/login", midware.CheckUserExists(repo), hand.Login)
 
 	logined := r.Group("/auth")
-	logined.Use(midware.CheckCookie(ctx, rdb))
+	logined.Use(midware.CheckAuth())
 	{
 		logined.POST("/test", hand.Test)
-		logined.POST("/logout", hand.Logout)
+		// logined.POST("/logout", hand.Logout)
 		logined.POST("/delacc", hand.Delacc)
 	}
 

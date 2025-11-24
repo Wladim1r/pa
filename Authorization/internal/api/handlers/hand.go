@@ -3,32 +3,30 @@ package handlers
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/Wladim1r/auth/internal/api/service"
 	"github.com/Wladim1r/auth/internal/models"
 	"github.com/Wladim1r/auth/lib/errs"
 	"github.com/Wladim1r/auth/lib/getenv"
 	"github.com/Wladim1r/auth/lib/hashpwd"
-	"github.com/Wladim1r/auth/periferia/reddis"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type handler struct {
 	ctx context.Context
 	s   service.Service
-	rdb *reddis.RDB
 }
 
-func NewHandler(ctx context.Context, service service.Service, rdb *reddis.RDB) *handler {
+func NewHandler(ctx context.Context, service service.Service) *handler {
 	return &handler{
 		ctx: ctx,
 		s:   service,
-		rdb: rdb,
+		// rdb: rdb,
 	}
 }
 
@@ -88,28 +86,40 @@ func (h *handler) Registration(c *gin.Context) {
 	})
 }
 
+func createJWT(name string) (string, error) {
+	claims := jwt.MapClaims{
+		"sub": name,
+		"exp": time.Now().Add(40 * time.Second).Unix(),
+	}
+
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signedToken, err := jwtToken.SignedString(getenv.GetString("SECRET_KEY", "default_secret_key"))
+	if err != nil {
+		return "", fmt.Errorf("failed to sign jwt: %w", err)
+	}
+
+	return signedToken, nil
+}
+
 func (h *handler) Login(c *gin.Context) {
 	name, ok := getFromCtx(c, "username")
 	if !ok {
 		return
 	}
 
-	key := make([]byte, 32)
-	rand.Read(key)
-	token := hex.EncodeToString(key)
+	jwt, err := createJWT(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
 
-	h.rdb.Record(h.ctx, token, name, getenv.GetTime("REDIS_TTL", 30))
-
-	c.SetCookie(
-		"token",
-		token,
-		getenv.GetInt("COOKIE_TTL", 30),
-		"/",
-		getenv.GetString("COOKIE_DOMAIN", "localhost"),
-		false,
-		true,
-	)
-	c.JSON(http.StatusOK, "Login success!🫦")
+	c.JSON(http.StatusOK, gin.H{
+		"msg":   "Login success!🫦",
+		"token": jwt,
+	})
 }
 
 func (h *handler) Test(c *gin.Context) {
@@ -118,27 +128,8 @@ func (h *handler) Test(c *gin.Context) {
 	})
 }
 
-func (h *handler) Logout(c *gin.Context) {
-	token, ok := getFromCtx(c, "token")
-	if !ok {
-		return
-	}
-
-	h.rdb.Delete(h.ctx, token)
-
-	c.SetCookie("token", "", -1, "/", getenv.GetString("COOKIE_DOMAIN", "localhost"), false, true)
-	c.JSON(http.StatusOK, gin.H{
-		"message": "you've got rid of 🍪🗑️",
-	})
-}
-
 func (h *handler) Delacc(c *gin.Context) {
 	name, ok := getFromCtx(c, "username")
-	if !ok {
-		return
-	}
-
-	token, ok := getFromCtx(c, "token")
 	if !ok {
 		return
 	}
@@ -159,9 +150,6 @@ func (h *handler) Delacc(c *gin.Context) {
 			return
 		}
 	}
-
-	h.rdb.Delete(h.ctx, token)
-	c.SetCookie("token", "", -1, "/", getenv.GetString("COOKIE_DOMAIN", "localhost"), false, true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "👍 user has successful deleted from DB",
