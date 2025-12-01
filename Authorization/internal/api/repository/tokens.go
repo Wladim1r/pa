@@ -62,6 +62,10 @@ func (r *repository) DeleteToken(hashedToken string) error {
 
 	result := r.db.Where("hash_token = ?", hashedToken).Delete(&models.RefreshToken{})
 
+	if result.RowsAffected == 0 {
+		return errs.ErrRecordingWNF
+	}
+
 	if result.Error != nil {
 		return fmt.Errorf("%w: %s", errs.ErrDB, result.Error.Error())
 	}

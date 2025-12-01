@@ -26,7 +26,7 @@ func main() {
 	uRepo.CreateTable()
 	uServ, tServ := serv.NewServices(uRepo, tRepo)
 
-	listen, err := net.Listen("tcp", "localhost:1234")
+	listen, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		panic(err)
 	}

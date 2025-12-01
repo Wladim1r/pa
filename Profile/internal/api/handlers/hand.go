@@ -3,12 +3,16 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/Wladim1r/profile/internal/models"
+	"github.com/Wladim1r/profile/lib/getenv"
 	"github.com/Wladim1r/proto-crypto/gen/protos/auth-portfile"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type client struct {
@@ -28,29 +32,27 @@ func (cl *client) Registration(c *gin.Context) {
 		return
 	}
 
-	resp, err := cl.conn.Register(
+	_, err := cl.conn.Register(
 		c.Request.Context(),
 		&auth.AuthRequest{Name: req.Name, Password: req.Password},
 	)
 	if err != nil {
-		c.JSON(int(resp.GetStatus()), gin.H{
-			"error": err.Error(),
-		})
+		st, ok := status.FromError(err)
+		if ok {
+			c.JSON(grpcCodeToHTTP(st.Code()), gin.H{
+				"error": st.Message(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown gRPC error",
+			})
+		}
 		return
 	}
 
-	switch resp.Status {
-	case http.StatusCreated:
-		c.JSON(http.StatusCreated, gin.H{
-			"message": "user successful created 🎊🤩",
-		})
-		return
-	case http.StatusConflict:
-		c.JSON(http.StatusConflict, gin.H{
-			"message": "user already exsited 💩",
-		})
-		return
-	}
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "user successful created 🎊🤩",
+	})
 }
 
 func (cl *client) Login(c *gin.Context) {
@@ -63,20 +65,26 @@ func (cl *client) Login(c *gin.Context) {
 	}
 
 	var header metadata.MD
-
 	resp, err := cl.conn.Login(
 		c.Request.Context(),
 		&auth.AuthRequest{Name: req.Name, Password: req.Password},
 		grpc.Header(&header),
 	)
 	if err != nil {
-		c.JSON(int(resp.GetStatus()), gin.H{
-			"error": err.Error(),
-		})
+		st, ok := status.FromError(err)
+		if ok {
+			c.JSON(grpcCodeToHTTP(st.Code()), gin.H{
+				"error": st.Message(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown gRPC error",
+			})
+		}
 		return
 	}
 
-	serverHeader, ok := header["x-user-id"]
+	userID, ok := header["x-user-id"]
 	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "there is no 'x-user-id' in the gRPC headers",
@@ -84,36 +92,25 @@ func (cl *client) Login(c *gin.Context) {
 		return
 	}
 
-	accessToken, ok := header["x-access-token"]
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "there is no access token in the gRPC headers",
-		})
-		return
-	}
+	access, refresh := resp.GetAccess(), resp.GetRefresh()
 
-	refreshToken, ok := header["x-refresh-token"]
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "there is no refresh token in the gRPC headers",
-		})
-		return
-	}
+	domain := getenv.GetString("COOKIE_DOMAIN", "localhost")
+	ttl := int(getenv.GetTime("REFRESH_TTL", 3*time.Minute).Seconds())
 
-	c.SetCookie("refreshToken", refreshToken[0], 300, "/", "localhost", false, true)
-	c.SetCookie("userID", serverHeader[0], 300, "/", "localhost", false, true)
+	c.SetCookie("refreshToken", refresh, ttl, "/", domain, false, true)
+	c.SetCookie("userID", userID[0], ttl, "/", domain, false, true)
 
 	tStruct := struct {
 		Access  string `json:"access"`
 		Refresh string `json:"refresh"`
 	}{
-		Access:  accessToken[0],
-		Refresh: refreshToken[0],
+		Access:  access,
+		Refresh: refresh,
 	}
 
-	c.JSON(int(resp.GetStatus()), gin.H{
-		"msg":                  "Login success!🫦",
-		"Here is your tokens🌐": tStruct,
+	c.JSON(http.StatusOK, gin.H{
+		"message":               "Login successful 👅🍭",
+		"🌐 Here is your tokens": tStruct,
 	})
 }
 
@@ -144,11 +141,18 @@ func (cl *client) Refresh(c *gin.Context) {
 		"x-refresh-token", refresh,
 	))
 
-	resp, err := cl.conn.Refresh(ctx, &auth.EmptyRequest{})
+	resp, err := cl.conn.Refresh(ctx, &auth.Empty{})
 	if err != nil {
-		c.JSON(int(resp.GetStatus()), gin.H{
-			"error": err.Error(),
-		})
+		st, ok := status.FromError(err)
+		if ok {
+			c.JSON(grpcCodeToHTTP(st.Code()), gin.H{
+				"error": st.Message(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown gRPC error",
+			})
+		}
 		return
 	}
 
@@ -160,9 +164,14 @@ func (cl *client) Refresh(c *gin.Context) {
 		Refresh: resp.GetRefresh(),
 	}
 
-	c.JSON(int(resp.GetStatus()), gin.H{
-		"msg":         "user succesfully logouted",
-		"your tokens": tStruct,
+	domain := getenv.GetString("COOKIE_DOMAIN", "localhost")
+	ttl := int(getenv.GetTime("REFRESH_TTL", 3*time.Minute).Seconds())
+
+	c.SetCookie("refreshToken", tStruct.Refresh, ttl, "/", domain, false, true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "tokens succesfully refreshed ♻️🤍",
+		"tokens 💁": tStruct,
 	})
 }
 
@@ -182,18 +191,48 @@ func (cl *client) Logout(c *gin.Context) {
 		"x-authorization-header", authHeader,
 	))
 
-	resp, err := cl.conn.Logout(ctx, &auth.EmptyRequest{})
+	_, err = cl.conn.Logout(ctx, &auth.Empty{})
 	if err != nil {
-		c.JSON(int(resp.GetStatus()), gin.H{
-			"error": err.Error(),
-		})
+		st, ok := status.FromError(err)
+		if ok {
+			c.JSON(grpcCodeToHTTP(st.Code()), gin.H{
+				"error": st.Message(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown gRPC error: " + err.Error(),
+			})
+		}
 		return
 	}
 
-	c.SetCookie("userID", "", -1, "/", "localhost", false, true)
-	c.SetCookie("refreshToken", "", -1, "/", "localhost", false, true)
+	domain := getenv.GetString("COOKIE_DOMAIN", "localhost")
 
-	c.JSON(int(resp.GetStatus()), gin.H{
-		"msg": "user succesfully logouted",
+	c.SetCookie("userID", "", -1, "/", domain, false, true)
+	c.SetCookie("refreshToken", "", -1, "/", domain, false, true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "user succesfully logouted 👉🚪",
 	})
+}
+
+func grpcCodeToHTTP(code codes.Code) int {
+	switch code {
+	case codes.OK:
+		return http.StatusOK
+	case codes.InvalidArgument:
+		return http.StatusBadRequest
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized
+	case codes.PermissionDenied:
+		return http.StatusForbidden
+	case codes.NotFound:
+		return http.StatusNotFound
+	case codes.AlreadyExists:
+		return http.StatusConflict
+	case codes.Internal:
+		return http.StatusInternalServerError
+	default:
+		return http.StatusInternalServerError
+	}
 }

@@ -1,292 +1,338 @@
 services:
-  zookeeper:
-    hostname: zookeeper
-    image: bitnamilegacy/zookeeper:latest
-    container_name: zookeeper
+  postgres:
+    image: postgres:15
     restart: always
     ports:
-      - "2181:2181"
+      - "5432:5432"
     environment:
-      ALLOW_ANONYMOUS_LOGIN: yes
-    networks:
-      - crypto-network
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: always
-    ports:
-      - "6379:6379"
-    command: >
-      redis-server
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --save ""
-      --appendonly no
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: users
     volumes:
-      - redis-data:/data
-    networks:
-      - crypto-network
+      - postgres-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "pg_isready", "-U", postgres]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       retries: 5
-
-  kafka:
-    hostname: kafka
-    image: bitnamilegacy/kafka:2.7.0
-    container_name: kafka
-    restart: always
-    depends_on:
-      zookeeper:
-        condition: service_healthy
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: PLAINTEXT://:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      ALLOW_PLAINTEXT_LISTENER: yes
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      # ⭐ НАСТРОЙКИ RETENTION
-      # Удалять сообщения старше 1 часа (3600000 мс)
-      KAFKA_LOG_RETENTION_MS: "3600000"
-      # Или по размеру: удалять когда топик больше 100MB
-      KAFKA_LOG_RETENTION_BYTES: "104857600"
-      # Проверять каждые 5 минут
-      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
-      # Размер сегмента (для быстрого удаления старых данных)
-      KAFKA_LOG_SEGMENT_BYTES: "10485760"
-      # Политика очистки: delete (удалять) или compact (компактить)
-      KAFKA_LOG_CLEANUP_POLICY: "delete"
-    networks:
-      - crypto-network
-    volumes:
-      - kafka-data:/bitnami/kafka
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "kafka-broker-api-versions.sh",
-          "--bootstrap-server",
-          "localhost:9092",
-        ]
-      interval: 5s
-      timeout: 10s
-      retries: 10
-
-  kafka-init:
-    image: bitnamilegacy/kafka:2.7.0
-    container_name: kafka-init
-    depends_on:
-      kafka:
-        condition: service_healthy
-    networks:
-      - crypto-network
-    command: >
-      bash -c "
-      echo '⏳ Waiting for Kafka to be fully ready...' &&
-      sleep 15 &&
-      echo '📝 Creating topic binance.miniticker...' &&
-      kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --replication-factor 1 --partitions 3 --topic binance.miniticker &&
-      echo '✅ Topic created successfully!' &&
-      echo '📋 Listing all topics:' &&
-      kafka-topics.sh --list --bootstrap-server kafka:9092 &&
-      echo '✅ Kafka initialization complete'
-      "
-    restart: "no"
-
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
-    restart: always
-    ports:
-      - "8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: crypto-cluster
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
-      DYNAMIC_CONFIG_ENABLED: "true"
-    depends_on:
-      kafka:
-        condition: service_healthy
+      start_period: 10s
     networks:
       - crypto-network
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: clickhouse
-    restart: always
-    ports:
-      - 8123:8123
-      - 9000:9000
-    environment:
-      CLICKHOUSE_DB: crypto
-      CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ""
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    volumes:
-      - clickhouse-data:/var/lib/clickhouse
-    networks:
-      - crypto-network
-    healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
-  redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: redis-commander
-    restart: always
-    ports:
-      - "8081:8081"
-    environment:
-      REDIS_HOSTS: "local:redis:6379"
-      HTTP_USER: admin
-      HTTP_PASSWORD: admin
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - crypto-network
-
-  tabix:
-    image: spoonest/clickhouse-tabix-web-client:latest
-    container_name: tabix
-    restart: always
-    ports:
-      - "8082:80"
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    networks:
-      - crypto-network
-
-  socket-service:
-    build: ./Socket/
+  authorization:
+    build: ./Authorization/
     env_file:
-      - ./Socket/.env
-    container_name: socket-service
-    restart: always
+      - ./Authorization/.env
+    container_name: auth-service
+    restart: on-failure:5
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "50051:50051"
     networks:
       - crypto-network
 
-  aggregator-service:
-    build: ./Aggregator/
-    env_file:
-      - ./Aggregator/.env
-    container_name: aggregator-service
-    restart: on-failure:5
-    depends_on:
-      kafka-init:
-        condition: service_completed_successfully
-      socket-service:
-        condition: service_started
-      redis:
-        condition: service_healthy
-    ports:
-      - "50061:50061"
-      - "8088:8088"
-    environment:
-      # Kafka settings
-      BROKERS: "kafka:9092"
-      TOPIC: "binance.miniticker"
-      BATCH_SIZE: "120"
-      BATCH_TIMEOUT: "2s"
-      ACK: "1"
-      MAX_ATTEMPTS: "3"
-      WRITE_TIMEOUT: "30s"
-
-      # Redis settings
-      REDIS_ADDR: "redis:6379"
-      REDIS_PWD: ""
-      REDIS_DB: "0"
-      REDIS_MAX_RETRIES: "10"
-      REDIS_TTL: "30s"
-      REDIS_RETRY_DELAY: "2s"
-      REDIS_PING_TIMEOUT: "5s"
-    networks:
-      - crypto-network
-
-  kafka-clickhouse:
-    build: ./Kafka-ClickHouse/
-    env_file:
-      - ./Kafka-ClickHouse/.env
-    container_name: kafka-clickhouse
-    restart: on-failure:5
-    depends_on:
-      aggregator-service:
-        condition: service_started
-      kafka-init:
-        condition: service_completed_successfully
-      clickhouse:
-        condition: service_healthy
-    ports:
-      - "50071:50071"
-    environment:
-      KAFKA_BROKERS: "kafka:9092"
-      KAFKA_TOPIC: "binance.miniticker"
-      KAFKA_GROUP_ID: "clickhouse-consumer-group"
-      KAFKA_MAX_RETRIES: "5"
-      KAFKA_RETRY_DELAY: "2s"
-      KAFKA_SESSION_TIMEOUT: "10s"
-      KAFKA_HEARTBEAT_INTERVAL: "3s"
-
-      CLICKHOUSE_ADDR: "clickhouse:9000"
-      CLICKHOUSE_DATABASE: "crypto"
-      CLICKHOUSE_TABLE: "market_tickers"
-      CLICKHOUSE_USERNAME: "default"
-      CLICKHOUSE_PASSWORD: ""
-
-      BATCH_SIZE: "1000"
-      BATCH_TIMEOUT: "5s"
-      CLICKHOUSE_MAX_RETRIES: "3"
-      CLICKHOUSE_DIAL_TIMEOUT: "10s"
-    networks:
-      - crypto-network
-
-  redis-dashboard:
-    build: ./Redis-Dashboard/
+  profile:
+    build: ./Profile/
     # env_file:
-    #     - ./Redis-Dashboard/.env
-    container_name: redis-dashboard
-    restart: on-failure:5
-    depends_on:
-      aggregator-service:
-        condition: service_started
+    #   - ./Profile/.env
+    container_name: profile-service
+    restart: on-failure
+    ports:
+      - "8080:8080"
     networks:
       - crypto-network
 
-  clickhouse-dashboard:
-    build: ./ClickHouse-Dashboard/
-    # env_file:
-    #     - ./Redis-Dashboard/.env
-    container_name: clickhouse-dashboard
-    restart: on-failure:5
-    ports:
-      - "8083:8083"
-    environment:
-      CLICKHOUSE_ADDR: "clickhouse:9000"
-    depends_on:
-      kafka-clickhouse:
-        condition: service_started
-    networks:
-      - crypto-network
+  # zookeeper:
+  #   hostname: zookeeper
+  #   image: bitnamilegacy/zookeeper:latest
+  #   container_name: zookeeper
+  #   restart: always
+  #   ports:
+  #     - "2181:2181"
+  #   environment:
+  #     ALLOW_ANONYMOUS_LOGIN: yes
+  #   networks:
+  #     - crypto-network
+  #   healthcheck:
+  #     test: ["CMD", "nc", "-z", "localhost", "2181"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: redis
+  #   restart: always
+  #   ports:
+  #     - "6379:6379"
+  #   command: >
+  #     redis-server
+  #     --maxmemory 256mb
+  #     --maxmemory-policy allkeys-lru
+  #     --save ""
+  #     --appendonly no
+  #   volumes:
+  #     - redis-data:/data
+  #   networks:
+  #     - crypto-network
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "ping"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #
+  # kafka:
+  #   hostname: kafka
+  #   image: bitnamilegacy/kafka:2.7.0
+  #   container_name: kafka
+  #   restart: always
+  #   depends_on:
+  #     zookeeper:
+  #       condition: service_healthy
+  #   ports:
+  #     - "9092:9092"
+  #   environment:
+  #     KAFKA_BROKER_ID: 1
+  #     KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+  #     KAFKA_LISTENERS: PLAINTEXT://:9092
+  #     KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+  #     ALLOW_PLAINTEXT_LISTENER: yes
+  #     KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  #     # ⭐ НАСТРОЙКИ RETENTION
+  #     # Удалять сообщения старше 1 часа (3600000 мс)
+  #     KAFKA_LOG_RETENTION_MS: "3600000"
+  #     # Или по размеру: удалять когда топик больше 100MB
+  #     KAFKA_LOG_RETENTION_BYTES: "104857600"
+  #     # Проверять каждые 5 минут
+  #     KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "300000"
+  #     # Размер сегмента (для быстрого удаления старых данных)
+  #     KAFKA_LOG_SEGMENT_BYTES: "10485760"
+  #     # Политика очистки: delete (удалять) или compact (компактить)
+  #     KAFKA_LOG_CLEANUP_POLICY: "delete"
+  #   networks:
+  #     - crypto-network
+  #   volumes:
+  #     - kafka-data:/bitnami/kafka
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD",
+  #         "kafka-broker-api-versions.sh",
+  #         "--bootstrap-server",
+  #         "localhost:9092",
+  #       ]
+  #     interval: 5s
+  #     timeout: 10s
+  #     retries: 10
+  #
+  # kafka-init:
+  #   image: bitnamilegacy/kafka:2.7.0
+  #   container_name: kafka-init
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   networks:
+  #     - crypto-network
+  #   command: >
+  #     bash -c "
+  #     echo '⏳ Waiting for Kafka to be fully ready...' &&
+  #     sleep 15 &&
+  #     echo '📝 Creating topic binance.miniticker...' &&
+  #     kafka-topics.sh --create --if-not-exists --bootstrap-server kafka:9092 --replication-factor 1 --partitions 3 --topic binance.miniticker &&
+  #     echo '✅ Topic created successfully!' &&
+  #     echo '📋 Listing all topics:' &&
+  #     kafka-topics.sh --list --bootstrap-server kafka:9092 &&
+  #     echo '✅ Kafka initialization complete'
+  #     "
+  #   restart: "no"
+  #
+  # kafka-ui:
+  #   image: provectuslabs/kafka-ui:latest
+  #   container_name: kafka-ui
+  #   restart: always
+  #   ports:
+  #     - "8080:8080"
+  #   environment:
+  #     KAFKA_CLUSTERS_0_NAME: crypto-cluster
+  #     KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+  #     KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+  #     DYNAMIC_CONFIG_ENABLED: "true"
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   networks:
+  #     - crypto-network
+  #
+  # clickhouse:
+  #   image: clickhouse/clickhouse-server:latest
+  #   container_name: clickhouse
+  #   restart: always
+  #   ports:
+  #     - 8123:8123
+  #     - 9000:9000
+  #   environment:
+  #     CLICKHOUSE_DB: crypto
+  #     CLICKHOUSE_USER: default
+  #     CLICKHOUSE_PASSWORD: ""
+  #     CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+  #   volumes:
+  #     - clickhouse-data:/var/lib/clickhouse
+  #   networks:
+  #     - crypto-network
+  #   healthcheck:
+  #     test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 5
+  #
+  # redis-commander:
+  #   image: rediscommander/redis-commander:latest
+  #   container_name: redis-commander
+  #   restart: always
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     REDIS_HOSTS: "local:redis:6379"
+  #     HTTP_USER: admin
+  #     HTTP_PASSWORD: admin
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - crypto-network
+  #
+  # tabix:
+  #   image: spoonest/clickhouse-tabix-web-client:latest
+  #   container_name: tabix
+  #   restart: always
+  #   ports:
+  #     - "8082:80"
+  #   depends_on:
+  #     clickhouse:
+  #       condition: service_healthy
+  #   networks:
+  #     - crypto-network
+  #
+  # socket-service:
+  #   build: ./Socket/
+  #   env_file:
+  #     - ./Socket/.env
+  #   container_name: socket-service
+  #   restart: always
+  #   ports:
+  #     - "50051:50051"
+  #   networks:
+  #     - crypto-network
+  #
+  # aggregator-service:
+  #   build: ./Aggregator/
+  #   env_file:
+  #     - ./Aggregator/.env
+  #   container_name: aggregator-service
+  #   restart: on-failure:5
+  #   depends_on:
+  #     kafka-init:
+  #       condition: service_completed_successfully
+  #     socket-service:
+  #       condition: service_started
+  #     redis:
+  #       condition: service_healthy
+  #   ports:
+  #     - "50061:50061"
+  #     - "8088:8088"
+  #   environment:
+  #     # Kafka settings
+  #     BROKERS: "kafka:9092"
+  #     TOPIC: "binance.miniticker"
+  #     BATCH_SIZE: "120"
+  #     BATCH_TIMEOUT: "2s"
+  #     ACK: "1"
+  #     MAX_ATTEMPTS: "3"
+  #     WRITE_TIMEOUT: "30s"
+  #
+  #     # Redis settings
+  #     REDIS_ADDR: "redis:6379"
+  #     REDIS_PWD: ""
+  #     REDIS_DB: "0"
+  #     REDIS_MAX_RETRIES: "10"
+  #     REDIS_TTL: "30s"
+  #     REDIS_RETRY_DELAY: "2s"
+  #     REDIS_PING_TIMEOUT: "5s"
+  #   networks:
+  #     - crypto-network
+  #
+  # kafka-clickhouse:
+  #   build: ./Kafka-ClickHouse/
+  #   env_file:
+  #     - ./Kafka-ClickHouse/.env
+  #   container_name: kafka-clickhouse
+  #   restart: on-failure:5
+  #   depends_on:
+  #     aggregator-service:
+  #       condition: service_started
+  #     kafka-init:
+  #       condition: service_completed_successfully
+  #     clickhouse:
+  #       condition: service_healthy
+  #   ports:
+  #     - "50071:50071"
+  #   environment:
+  #     KAFKA_BROKERS: "kafka:9092"
+  #     KAFKA_TOPIC: "binance.miniticker"
+  #     KAFKA_GROUP_ID: "clickhouse-consumer-group"
+  #     KAFKA_MAX_RETRIES: "5"
+  #     KAFKA_RETRY_DELAY: "2s"
+  #     KAFKA_SESSION_TIMEOUT: "10s"
+  #     KAFKA_HEARTBEAT_INTERVAL: "3s"
+  #
+  #     CLICKHOUSE_ADDR: "clickhouse:9000"
+  #     CLICKHOUSE_DATABASE: "crypto"
+  #     CLICKHOUSE_TABLE: "market_tickers"
+  #     CLICKHOUSE_USERNAME: "default"
+  #     CLICKHOUSE_PASSWORD: ""
+  #
+  #     BATCH_SIZE: "1000"
+  #     BATCH_TIMEOUT: "5s"
+  #     CLICKHOUSE_MAX_RETRIES: "3"
+  #     CLICKHOUSE_DIAL_TIMEOUT: "10s"
+  #   networks:
+  #     - crypto-network
+  #
+  # redis-dashboard:
+  #   build: ./Redis-Dashboard/
+  #   # env_file:
+  #   #     - ./Redis-Dashboard/.env
+  #   container_name: redis-dashboard
+  #   restart: on-failure:5
+  #   depends_on:
+  #     aggregator-service:
+  #       condition: service_started
+  #   networks:
+  #     - crypto-network
+  #
+  # clickhouse-dashboard:
+  #   build: ./ClickHouse-Dashboard/
+  #   # env_file:
+  #   #     - ./ClickHouse-Dashboard/.env
+  #   container_name: clickhouse-dashboard
+  #   restart: on-failure:5
+  #   ports:
+  #     - "8083:8083"
+  #   environment:
+  #     CLICKHOUSE_ADDR: "clickhouse:9000"
+  #   depends_on:
+  #     kafka-clickhouse:
+  #       condition: service_started
+  #   networks:
+  #     - crypto-network
 
 volumes:
   kafka-data:
   redis-data:
   clickhouse-data:
+  postgres-data:
 
 networks:
   crypto-network:

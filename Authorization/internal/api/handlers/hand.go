@@ -4,8 +4,6 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -16,7 +14,9 @@ import (
 	"github.com/Wladim1r/auth/lib/hashpwd"
 	"github.com/Wladim1r/proto-crypto/gen/protos/auth-portfile"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 )
 
 type handler struct {
@@ -39,7 +39,7 @@ func RegisterServer(
 	})
 }
 
-func (h *handler) Register(ctx context.Context, req *auth.AuthRequest) (*auth.AuthResponse, error) {
+func (h *handler) Register(ctx context.Context, req *auth.AuthRequest) (*auth.Empty, error) {
 	name := req.GetName()
 	password := req.GetPassword()
 
@@ -50,42 +50,31 @@ func (h *handler) Register(ctx context.Context, req *auth.AuthRequest) (*auth.Au
 		case errors.Is(err, errs.ErrRecordingWNF):
 			hashPwd, err := hashpwd.HashPwd([]byte(password))
 			if err != nil {
-				return &auth.AuthResponse{
-					Status: http.StatusInternalServerError,
-				}, fmt.Errorf("Could not hash password: %w", err)
+				return nil, status.Error(codes.Internal, "Could not hash password: "+err.Error())
 			}
 
 			if err := h.us.CreateUser(name, hashPwd); err != nil {
 				switch {
 				case errors.Is(err, errs.ErrRecordingWNC):
-					return &auth.AuthResponse{
-						Status: http.StatusInternalServerError,
-					}, fmt.Errorf("Could not create user rawsAffected=0: %w", err)
-
+					return nil, status.Error(
+						codes.Internal,
+						"Could not create user rawsAffected=0: "+err.Error(),
+					)
 				default:
-					return &auth.AuthResponse{
-						Status: http.StatusInternalServerError,
-					}, fmt.Errorf("Could not create user: %w", err)
+					return nil, status.Error(codes.Internal, "Could not create user: "+err.Error())
 				}
 			}
-
-			return &auth.AuthResponse{
-				Status: http.StatusCreated,
-			}, nil
+			return &auth.Empty{}, nil
 
 		default:
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("db error: %w", err)
+			return nil, status.Error(codes.Internal, "db error: "+err.Error())
 		}
 	}
 
-	return &auth.AuthResponse{
-		Status: http.StatusConflict,
-	}, nil
+	return nil, status.Error(codes.AlreadyExists, "User has already existed 💩")
 }
 
-func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.AuthResponse, error) {
+func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.TokenResponse, error) {
 	name := req.GetName()
 	password := req.GetPassword()
 
@@ -93,17 +82,11 @@ func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.AuthR
 	if err != nil {
 		switch {
 		case errors.Is(err, errs.ErrRecordingWNF):
-			return &auth.AuthResponse{
-				Status: http.StatusNotFound,
-			}, err
+			return nil, status.Error(codes.NotFound, "User not found")
 		case errors.Is(err, errs.ErrDB):
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("db error: %w", err)
+			return nil, status.Error(codes.Internal, "db error: "+err.Error())
 		default:
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("unknown error: %w", err)
+			return nil, status.Error(codes.Internal, "unknown error: "+err.Error())
 		}
 	}
 
@@ -113,25 +96,18 @@ func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.AuthR
 	if err != nil {
 		switch {
 		case errors.Is(err, errs.ErrRecordingWNF):
-			return &auth.AuthResponse{
-				Status: http.StatusNotFound,
-			}, fmt.Errorf("could not found user: %w", err)
+			return nil, status.Error(codes.NotFound, "could not found user: "+err.Error())
+
 		case errors.Is(err, errs.ErrRecordingWNC):
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("could not create token: %w", err)
+			return nil, status.Error(codes.Internal, "could not create token: "+err.Error())
 		case errors.Is(err, errs.ErrDB):
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("db error: %w", err)
+			return nil, status.Error(codes.Internal, "db error: "+err.Error())
+
 		case errors.Is(err, errs.ErrSignToken):
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("jwt error: %w", err)
+			return nil, status.Error(codes.Internal, "jwt error: "+err.Error())
+
 		default:
-			return &auth.AuthResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("unknown error: %w", err)
+			return nil, status.Error(codes.Internal, "unknown error: "+err.Error())
 		}
 	}
 
@@ -139,25 +115,19 @@ func (h *handler) Login(ctx context.Context, req *auth.AuthRequest) (*auth.AuthR
 
 	userIDHeader := metadata.Pairs(
 		"x-user-id", userIDstr,
-		"x-access-token", access,
-		"x-refresh-token", refresh,
 	)
 	grpc.SendHeader(ctx, userIDHeader)
 
-	return &auth.AuthResponse{
-		Status: http.StatusOK,
-	}, nil
+	return &auth.TokenResponse{Access: access, Refresh: refresh}, nil
 }
 
 func (h *handler) Refresh(
 	ctx context.Context,
-	req *auth.EmptyRequest,
+	req *auth.Empty,
 ) (*auth.TokenResponse, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return &auth.TokenResponse{
-			Status: http.StatusInternalServerError,
-		}, fmt.Errorf("could not found metadata in grpc context")
+		return nil, status.Error(codes.Internal, "could not found metadata in grpc context")
 	}
 
 	userIDstr := md.Get("x-user-id")
@@ -177,46 +147,35 @@ func (h *handler) Refresh(
 	)
 	if err != nil {
 		switch {
-		case errors.Is(err, errs.ErrRecordingWNF):
-			return &auth.TokenResponse{
-				Status: http.StatusNotFound,
-			}, fmt.Errorf("could not found user: %w", err)
 		case errors.Is(err, errs.ErrTokenTTL):
-			return &auth.TokenResponse{
-				Status: http.StatusForbidden,
-			}, err
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+
+		case errors.Is(err, errs.ErrRecordingWNF):
+			return nil, status.Error(codes.NotFound, "could not found user: "+err.Error())
+
 		case errors.Is(err, errs.ErrRecordingWNC):
-			return &auth.TokenResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("could not create token: %w", err)
+			return nil, status.Error(codes.Internal, "could not create token: "+err.Error())
+
 		case errors.Is(err, errs.ErrDB):
-			return &auth.TokenResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("db error: %w", err)
+			return nil, status.Error(codes.Internal, "db error: "+err.Error())
 		case errors.Is(err, errs.ErrSignToken):
-			return &auth.TokenResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("jwt error: %w", err)
+			return nil, status.Error(codes.Internal, "jwt error: "+err.Error())
+
 		default:
-			return &auth.TokenResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("unknown error: %w", err)
+			return nil, status.Error(codes.Internal, "unknown error: "+err.Error())
 		}
 	}
 
 	return &auth.TokenResponse{
-		Status:  http.StatusOK,
 		Access:  access,
 		Refresh: refresh,
 	}, nil
 }
 
-func (h *handler) Logout(ctx context.Context, req *auth.EmptyRequest) (*auth.LoginResponse, error) {
+func (h *handler) Logout(ctx context.Context, req *auth.Empty) (*auth.Empty, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return &auth.LoginResponse{
-			Status: http.StatusInternalServerError,
-		}, fmt.Errorf("could not found metadata in grpc context")
+		return nil, status.Error(codes.Internal, "could not found metadata in grpc context")
 	}
 
 	refreshToken := md.Get("x-refresh-token")[0]
@@ -225,46 +184,39 @@ func (h *handler) Logout(ctx context.Context, req *auth.EmptyRequest) (*auth.Log
 	if err := checkAuth(authHeader, h.ur); err != nil {
 		switch {
 		case errors.Is(err, errs.ErrEmptyAuthHeader):
-			return &auth.LoginResponse{
-				Status: http.StatusUnauthorized,
-			}, fmt.Errorf("user is not registered: %w", err)
+			return nil, status.Error(
+				codes.Unauthenticated,
+				"user is not registered: "+err.Error(),
+			)
 		case errors.Is(err, errs.ErrInvalidToken):
-			return &auth.LoginResponse{
-				Status: http.StatusForbidden,
-			}, err
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+
 		case errors.Is(err, errs.ErrTokenTTL):
-			return &auth.LoginResponse{
-				Status: http.StatusForbidden,
-			}, err
+			return nil, status.Error(codes.PermissionDenied, err.Error())
+
 		case errors.Is(err, errs.ErrRecordingWNF):
-			return &auth.LoginResponse{
-				Status: http.StatusNotFound,
-			}, fmt.Errorf("user does not exist: %w", err)
+			return nil, status.Error(codes.NotFound, "user does not exist: "+err.Error())
+
 		case errors.Is(err, errs.ErrDB):
-			return &auth.LoginResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("db error: %w", err)
+			return nil, status.Error(codes.Internal, "db error: "+err.Error())
+
 		default:
-			return &auth.LoginResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("unknown error: %w", err)
+			return nil, status.Error(codes.Internal, "unknowm error: "+err.Error())
 		}
 	}
 
 	if err := h.ts.DeleteToken(refreshToken); err != nil {
 		switch {
+		case errors.Is(err, errs.ErrRecordingWNF):
+			return nil, status.Error(codes.NotFound, "token not found :"+err.Error())
+
 		case errors.Is(err, errs.ErrDB):
-			return &auth.LoginResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("db error: %w", err)
+			return nil, status.Error(codes.Internal, "db error: "+err.Error())
+
 		default:
-			return &auth.LoginResponse{
-				Status: http.StatusInternalServerError,
-			}, fmt.Errorf("unknown error: %w", err)
+			return nil, status.Error(codes.Internal, "unknown error: "+err.Error())
 		}
 	}
 
-	return &auth.LoginResponse{
-		Status: http.StatusOK,
-	}, nil
+	return &auth.Empty{}, nil
 }

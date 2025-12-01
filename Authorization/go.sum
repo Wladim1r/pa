@@ -1,5 +1,5 @@
-github.com/Wladim1r/proto-crypto v0.1.9 h1:3D3Zs0BgLGBcs+B8UQBHasp2zia9CJb9gqS5xPJJ4SQ=
-github.com/Wladim1r/proto-crypto v0.1.9/go.mod h1:z8xOztGeb29TysgKvJ8+cdlZXvvLhSYTS3k+qyrgu+w=
+github.com/Wladim1r/proto-crypto v0.2.1 h1:B1HaeIrRDLid6X+iOEP0nIczviZZr4ixTJH4lcAyPfI=
+github.com/Wladim1r/proto-crypto v0.2.1/go.mod h1:z8xOztGeb29TysgKvJ8+cdlZXvvLhSYTS3k+qyrgu+w=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

@@ -23,7 +23,7 @@ func main() {
 	wg := new(sync.WaitGroup)
 
 	conn, err := grpc.NewClient(
-		"localhost:1234",
+		getenv.GetString("GRPC_ADDR", "localhost:50051"),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {

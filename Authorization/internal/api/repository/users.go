@@ -68,7 +68,7 @@ func (r *repository) DeleteUser(userID uint) error {
 func (r *repository) SelectPwdByName(name string) (uint, string, error) {
 	var user models.User
 
-	result := r.db.Table("users").Select("password").Where("name = ?", name).Scan(&user)
+	result := r.db.Table("users").Select("id", "password").Where("name = ?", name).Scan(&user)
 
 	if result.RowsAffected == 0 {
 		return 0, "", errs.ErrRecordingWNF

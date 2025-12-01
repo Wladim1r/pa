@@ -3,7 +3,7 @@ module github.com/Wladim1r/auth
 go 1.24.4
 
 require (
-	github.com/Wladim1r/proto-crypto v0.1.9
+	github.com/Wladim1r/proto-crypto v0.2.1
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	golang.org/x/crypto v0.43.0
