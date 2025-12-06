@@ -13,8 +13,8 @@ import (
 
 type UsersDB interface {
 	CreateUser(user *models.User) error
-	DeleteUserByID(userID uuid.UUID) error
 	GetUserByName(name string) (*models.User, error)
+	DeleteUserByID(userID uuid.UUID) error
 }
 
 type usersDB struct {
