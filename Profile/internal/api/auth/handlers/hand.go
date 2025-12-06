@@ -3,8 +3,10 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/Wladim1r/profile/internal/api/profile/service"
 	"github.com/Wladim1r/profile/internal/models"
 	"github.com/Wladim1r/profile/lib/getenv"
 	"github.com/Wladim1r/proto-crypto/gen/protos/auth-portfile"
@@ -17,10 +19,11 @@ import (
 
 type client struct {
 	conn auth.AuthClient
+	us   service.UsersService
 }
 
-func NewClient(c auth.AuthClient) *client {
-	return &client{conn: c}
+func NewClient(c auth.AuthClient, us service.UsersService) *client {
+	return &client{conn: c, us: us}
 }
 
 func (cl *client) Registration(c *gin.Context) {
@@ -32,40 +35,9 @@ func (cl *client) Registration(c *gin.Context) {
 		return
 	}
 
-	_, err := cl.conn.Register(
-		c.Request.Context(),
-		&auth.AuthRequest{Name: req.Name, Password: req.Password},
-	)
-	if err != nil {
-		st, ok := status.FromError(err)
-		if ok {
-			c.JSON(grpcCodeToHTTP(st.Code()), gin.H{
-				"error": st.Message(),
-			})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "unknown gRPC error",
-			})
-		}
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "user successful created 🎊🤩",
-	})
-}
-
-func (cl *client) Login(c *gin.Context) {
-	var req models.UserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
 	var header metadata.MD
-	resp, err := cl.conn.Login(
+
+	_, err := cl.conn.Register(
 		c.Request.Context(),
 		&auth.AuthRequest{Name: req.Name, Password: req.Password},
 		grpc.Header(&header),
@@ -92,13 +64,46 @@ func (cl *client) Login(c *gin.Context) {
 		return
 	}
 
+	cl.us.CreateUserProfile(userID[0])
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "user successful created 🎊🤩",
+	})
+}
+
+func (cl *client) Login(c *gin.Context) {
+	var req models.UserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	resp, err := cl.conn.Login(
+		c.Request.Context(),
+		&auth.AuthRequest{Name: req.Name, Password: req.Password},
+	)
+	if err != nil {
+		st, ok := status.FromError(err)
+		if ok {
+			c.JSON(grpcCodeToHTTP(st.Code()), gin.H{
+				"error": st.Message(),
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown gRPC error",
+			})
+		}
+		return
+	}
+
 	access, refresh := resp.GetAccess(), resp.GetRefresh()
 
 	domain := getenv.GetString("COOKIE_DOMAIN", "localhost")
 	ttl := int(getenv.GetTime("REFRESH_TTL", 3*time.Minute).Seconds())
 
 	c.SetCookie("refreshToken", refresh, ttl, "/", domain, false, true)
-	c.SetCookie("userID", userID[0], ttl, "/", domain, false, true)
 
 	tStruct := struct {
 		Access  string `json:"access"`
@@ -121,13 +126,17 @@ func (cl *client) Test(c *gin.Context) {
 }
 
 func (cl *client) Refresh(c *gin.Context) {
-	userID, err := c.Cookie("userID")
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"error": "there is no 'userID' in the cookies: " + err.Error(),
+	userIDany, ok := c.Get("user_id")
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "'user_id' not found in access token",
 		})
 		return
 	}
+
+	userID := userIDany.(float64)
+	userIDstr := strconv.Itoa(int(userID))
+
 	refresh, err := c.Cookie("refreshToken")
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -137,7 +146,7 @@ func (cl *client) Refresh(c *gin.Context) {
 	}
 
 	ctx := metadata.NewOutgoingContext(c.Request.Context(), metadata.Pairs(
-		"x-user-id", userID,
+		"x-user-id", userIDstr,
 		"x-refresh-token", refresh,
 	))
 
@@ -208,7 +217,6 @@ func (cl *client) Logout(c *gin.Context) {
 
 	domain := getenv.GetString("COOKIE_DOMAIN", "localhost")
 
-	c.SetCookie("userID", "", -1, "/", domain, false, true)
 	c.SetCookie("refreshToken", "", -1, "/", domain, false, true)
 
 	c.JSON(http.StatusOK, gin.H{

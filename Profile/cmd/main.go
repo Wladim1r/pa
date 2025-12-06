@@ -6,8 +6,13 @@ import (
 	"os/signal"
 	"sync"
 
-	hand "github.com/Wladim1r/profile/internal/api/handlers"
+	hand "github.com/Wladim1r/profile/internal/api/auth/handlers"
+	handler "github.com/Wladim1r/profile/internal/api/profile/handlers"
+	"github.com/Wladim1r/profile/internal/api/profile/repository"
+	"github.com/Wladim1r/profile/internal/api/profile/service"
 	"github.com/Wladim1r/profile/lib/getenv"
+	"github.com/Wladim1r/profile/lib/midware"
+	"github.com/Wladim1r/profile/periferia/db"
 	"github.com/Wladim1r/proto-crypto/gen/protos/auth-portfile"
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
@@ -15,7 +20,11 @@ import (
 )
 
 func main() {
-	// db := db.MustLoad()
+	db := db.MustLoad()
+	uRepo, cRepo := repository.NewProfileRepository(db)
+	uRepo.CreateTables()
+	uServ, cServ := service.NewProfileService(uRepo, cRepo)
+	handler := handler.NewHandler(uServ, cServ)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -32,18 +41,35 @@ func main() {
 
 	authConn := auth.NewAuthClient(conn)
 
-	hand := hand.NewClient(authConn)
+	hand := hand.NewClient(authConn, uServ)
 
 	r := gin.Default()
 
-	r.POST("/register", hand.Registration)
-	r.POST("/login", hand.Login)
-
-	auth := r.Group("/auth")
+	v1 := r.Group("/v1")
 	{
-		auth.POST("/test", hand.Test)
-		auth.POST("/refresh", hand.Refresh)
-		auth.POST("/logout", hand.Logout)
+		v1.POST("/register", hand.Registration)
+		v1.POST("/login", hand.Login)
+
+		v1.POST("/refresh", midware.CheckAuth(true), hand.Refresh)
+
+		auth := v1.Group("/auth")
+		auth.Use(midware.CheckAuth(false))
+		{
+			auth.POST("/test", hand.Test)
+			auth.POST("/logout", hand.Logout)
+		}
+	}
+
+	v2 := r.Group("/profile")
+	v2.Use(midware.CheckAuth(false))
+	{
+		coins := v2.Group("/coin")
+		{
+			coins.GET("/symbols", handler.CoinsGet)
+			coins.POST("/symbol", handler.CoinAdd)
+			coins.PATCH("/symbol", handler.CoinUpdate)
+			coins.DELETE("/symbol", handler.CoinDelete)
+		}
 	}
 
 	server := http.Server{
