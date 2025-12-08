@@ -28,9 +28,9 @@ func (h *handler) GetCoins(c *gin.Context) {
 		return
 	}
 
-	userIDstr := userIDany.(float64)
+	userID := userIDany.(float64)
 
-	coins, err := h.cs.GetCoins(int(userIDstr))
+	coins, err := h.cs.GetCoins(userID)
 	if err != nil {
 		switch {
 		case errors.Is(err, errs.ErrRecordingWNF):
@@ -71,9 +71,9 @@ func (h *handler) AddCoin(c *gin.Context) {
 		return
 	}
 
-	userIDstr := userIDany.(float64)
+	userID := userIDany.(float64)
 
-	if err := h.cs.AddCoin(int(userIDstr), req.Symbol, req.Quantity); err != nil {
+	if err := h.cs.AddCoin(userID, req.Symbol, req.Quantity); err != nil {
 		switch {
 		case errors.Is(err, errs.ErrDuplicated):
 			c.JSON(http.StatusConflict, gin.H{
@@ -113,9 +113,9 @@ func (h *handler) UpdateCoin(c *gin.Context) {
 		return
 	}
 
-	userIDstr := userIDany.(float64)
+	userID := userIDany.(float64)
 
-	if err := h.cs.UpdateCoin(int(userIDstr), req.Symbol, req.Quantity); err != nil {
+	if err := h.cs.UpdateCoin(userID, req.Symbol, req.Quantity); err != nil {
 		switch {
 		case errors.Is(err, errs.ErrDB):
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -151,9 +151,9 @@ func (h *handler) DeleteCoin(c *gin.Context) {
 		return
 	}
 
-	userIDstr := userIDany.(float64)
+	userID := userIDany.(float64)
 
-	if err := h.cs.DeleteCoin(int(userIDstr), req.Symbol); err != nil {
+	if err := h.cs.DeleteCoin(userID, req.Symbol); err != nil {
 		switch {
 		case errors.Is(err, errs.ErrDB):
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -169,5 +169,72 @@ func (h *handler) DeleteCoin(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "choosed coin updated V",
+	})
+}
+
+// ------------------------------------------------------------------
+
+func (h *handler) GetUserProfile(c *gin.Context) {
+	userIDany, ok := c.Get("user_id")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "no cookie",
+		})
+		return
+	}
+
+	userID := userIDany.(float64)
+
+	user, err := h.us.GetUserProfileByUserID(userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, errs.ErrRecordingWNF):
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": err.Error(),
+			})
+		case errors.Is(err, errs.ErrDB):
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown error: " + err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user profile": *user,
+	})
+}
+
+func (h *handler) DeleteUserProfile(c *gin.Context) {
+	userIDany, ok := c.Get("user_id")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "no cookie",
+		})
+		return
+	}
+
+	userID := userIDany.(float64)
+
+	if err := h.us.DeleteUserProfileByUserID(userID); err != nil {
+		switch {
+		case errors.Is(err, errs.ErrDB):
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "unknown error: " + err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "user has deleted",
 	})
 }

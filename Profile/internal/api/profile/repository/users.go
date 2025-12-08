@@ -1,12 +1,14 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/Wladim1r/profile/internal/models"
 	"github.com/Wladim1r/profile/lib/errs"
+	"gorm.io/gorm"
 )
 
 type UsersRepository interface {
@@ -44,10 +46,22 @@ func (r *repository) CreateUserProfile(user models.User) error {
 }
 
 func (r *repository) GetUserProfileByUserID(userID uint) (*models.User, error) {
-	return nil, nil
+	var user models.User
+	if err := r.db.Preload("Coins").First(&user, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: %s", errs.ErrRecordingWNF, err.Error())
+		}
+		return nil, fmt.Errorf("%w: %s", errs.ErrDB, err.Error())
+	}
+
+	return &user, nil
 }
 
 func (r *repository) DeleteUserProfileByUserID(userID uint) error {
+	if err := r.db.Where("id = ?", userID).Delete(&models.User{}).Error; err != nil {
+		return fmt.Errorf("%w: %s", errs.ErrDB, err.Error())
+	}
+
 	return nil
 }
 

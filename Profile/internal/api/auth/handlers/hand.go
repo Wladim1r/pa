@@ -64,7 +64,11 @@ func (cl *client) Registration(c *gin.Context) {
 		return
 	}
 
-	cl.us.CreateUserProfile(userID[0])
+	if err := cl.us.CreateUserProfile(userID[0], req.Name); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": err.Error(),
+		})
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "user successful created 🎊🤩",

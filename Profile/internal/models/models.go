@@ -7,6 +7,7 @@ import (
 
 type User struct {
 	ID    uint   `gorm:"primaryKey"`
+	Name  string `gorm:"unique;not null"`
 	Coins []Coin `gorm:"foreignKey:UserID"`
 }
 

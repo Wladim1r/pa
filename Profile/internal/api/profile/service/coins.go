@@ -6,10 +6,10 @@ import (
 )
 
 type CoinsService interface {
-	GetCoins(userID int) ([]*models.Coin, error)
-	AddCoin(userID int, symbol string, quantity float32) error
-	UpdateCoin(userID int, symbol string, quantity float32) error
-	DeleteCoin(userID int, symbol string) error
+	GetCoins(userID float64) ([]*models.Coin, error)
+	AddCoin(userID float64, symbol string, quantity float32) error
+	UpdateCoin(userID float64, symbol string, quantity float32) error
+	DeleteCoin(userID float64, symbol string) error
 }
 
 func (ps *service) GetCoins(userID int) ([]*models.Coin, error) {

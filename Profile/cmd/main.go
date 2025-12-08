@@ -60,7 +60,7 @@ func main() {
 		}
 	}
 
-	v2 := r.Group("/profile")
+	v2 := r.Group("/v2")
 	v2.Use(midware.CheckAuth(false))
 	{
 		coins := v2.Group("/coin")
@@ -69,6 +69,12 @@ func main() {
 			coins.POST("/symbol", handler.AddCoin)
 			coins.PATCH("/symbol", handler.UpdateCoin)
 			coins.DELETE("/symbol", handler.DeleteCoin)
+		}
+
+		user := v2.Group("/user")
+		{
+			user.GET("/profile", handler.GetUserProfile)
+			user.DELETE("/profile", handler.DeleteUserProfile)
 		}
 	}
 
