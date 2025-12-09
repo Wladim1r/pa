@@ -3,9 +3,11 @@ package reddis
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 
+	"github.com/Wladim1r/aggregator/gateway/strman"
 	"github.com/Wladim1r/aggregator/models"
 	"github.com/redis/go-redis/v9"
 )
@@ -13,9 +15,10 @@ import (
 type saver struct {
 	rdb *redis.Client
 	cfg redisConfig
+	sm  *strman.StreamManager
 }
 
-func NewSaver(cfg redisConfig) *saver {
+func NewSaver(cfg redisConfig, sm *strman.StreamManager) *saver {
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     cfg.Addr,
 		Password: cfg.Password,
@@ -25,6 +28,7 @@ func NewSaver(cfg redisConfig) *saver {
 	return &saver{
 		rdb: rdb,
 		cfg: cfg,
+		sm:  sm,
 	}
 }
 
@@ -33,18 +37,11 @@ func (s *saver) setPing(ctx context.Context) error {
 }
 
 func (s *saver) saveSecondStat(ctx context.Context, msg models.SecondStat) error {
-	// key := msg.Symbol
-
 	data, err := json.Marshal(msg)
 	if err != nil {
 		slog.Error("Could not parse SecondStat struct into []bytes", "error", err)
 		return err
 	}
-
-	// if err := s.rdb.Set(ctx, key, data, s.cfg.TTL).Err(); err != nil {
-	// 	slog.Error("Could not save msg to Kafka", "error", err)
-	// 	return err
-	// }
 
 	cmd := s.rdb.Publish(ctx, "stream", data)
 	if cmd.Err() != nil {
@@ -77,15 +74,29 @@ func (s *saver) Start(ctx context.Context, wg *sync.WaitGroup, inChan chan model
 				return
 			}
 
-			if err := s.saveSecondStat(ctx, stat); err != nil {
-				slog.Error("Failed to save SecondStat to Redis",
-					"symbol", stat.Symbol,
-					"error", err,
-				)
-				continue
+			fmt.Println(stat.Symbol)
+			fmt.Println(s.sm.Followers)
+			followers := s.sm.GetFollowers(stat.Symbol)
+
+			for _, id := range followers {
+				stat.UserID = id
+				if err := s.saveSecondStat(ctx, stat); err != nil {
+					slog.Error("Failed to save SecondStat to Redis",
+						"symbol", stat.Symbol,
+						"userID", stat.UserID,
+						"error", err,
+					)
+					continue
+				}
 			}
 
-			slog.Info("Saved to Redis")
+			slog.Debug(
+				"Saved to Redis for followers",
+				"symbol",
+				stat.Symbol,
+				"count",
+				len(followers),
+			)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/Wladim1r/aggregator/models"
@@ -71,11 +72,8 @@ func receiveSecondStat(
 				return
 			}
 			secondStat := models.SecondStat{
-				EventTime: msg.EventTime,
-				Symbol:    msg.Symbol,
-				Price:     msg.PriceFloat(),
-				Quantity:  msg.Quantity,
-				TradeTime: msg.TradeTime,
+				Symbol: strings.ToLower(msg.Symbol),
+				Price:  msg.PriceFloat(),
 			}
 			select {
 			case <-ctx.Done():
