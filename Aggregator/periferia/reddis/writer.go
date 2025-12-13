@@ -3,7 +3,6 @@ package reddis
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"sync"
 
@@ -36,14 +35,17 @@ func (s *saver) setPing(ctx context.Context) error {
 	return s.rdb.Ping(ctx).Err()
 }
 
-func (s *saver) saveSecondStat(ctx context.Context, msg models.SecondStat) error {
+func (s *saver) saveSecondStat(
+	ctx context.Context,
+	streamName string,
+	msg models.SecondStat,
+) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		slog.Error("Could not parse SecondStat struct into []bytes", "error", err)
 		return err
 	}
-
-	cmd := s.rdb.Publish(ctx, "stream", data)
+	cmd := s.rdb.Publish(ctx, streamName, data)
 	if cmd.Err() != nil {
 		slog.Error("Could not sent msg to Redis", "error", err)
 		return err
@@ -74,21 +76,21 @@ func (s *saver) Start(ctx context.Context, wg *sync.WaitGroup, inChan chan model
 				return
 			}
 
-			fmt.Println(stat.Symbol)
-			fmt.Println(s.sm.Followers)
+			slog.Debug("Followers state", "list", s.sm.Followers)
 			followers := s.sm.GetFollowers(stat.Symbol)
 
-			for _, id := range followers {
-				stat.UserID = id
-				if err := s.saveSecondStat(ctx, stat); err != nil {
-					slog.Error("Failed to save SecondStat to Redis",
-						"symbol", stat.Symbol,
-						"userID", stat.UserID,
-						"error", err,
-					)
-					continue
-				}
+			if err := s.saveSecondStat(ctx, stat.Symbol, stat); err != nil {
+				slog.Error("Failed to save SecondStat to Redis",
+					"symbol", stat.Symbol,
+					"userID", stat.UserID,
+					"error", err,
+				)
+				continue
 			}
+
+			// for _, id := range followers {
+			// 	stat.UserID = id
+			// }
 
 			slog.Debug(
 				"Saved to Redis for followers",

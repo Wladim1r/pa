@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Wladim1r/aggregator/models"
 )
@@ -60,30 +61,50 @@ func receiveSecondStat(
 ) {
 	defer wg.Done()
 
+	// Map to store latest price per symbol
+	latestPrices := make(map[string]float64)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			slog.Info(
-				"Got Interruption signal, stopping to receiving messages from MiniTicker chan",
+				"Got Interruption signal, stopping to receiving messages from aggTrade chan",
 			)
 			return
 		case msg, ok := <-inChan:
 			if !ok {
 				return
 			}
-			secondStat := models.SecondStat{
-				Symbol: strings.ToLower(msg.Symbol),
-				Price:  msg.PriceFloat(),
+			// Update latest price for this symbol
+			symbol := strings.ToLower(msg.Symbol)
+			latestPrices[symbol] = msg.PriceFloat()
+		case <-ticker.C:
+			// Every second, send latest prices for all symbols
+			for symbol, price := range latestPrices {
+				secondStat := models.SecondStat{
+					Symbol: symbol,
+					Price:  price,
+				}
+				select {
+				case <-ctx.Done():
+					slog.Info(
+						"Got Interruption signal, stopping to receiving messages from aggTrade chan",
+					)
+					return
+				case outChan <- secondStat:
+					// Successfully sent
+				default:
+					// Channel is full, but this should be rare now with 1-second aggregation
+					// Log only if it happens multiple times
+					slog.Debug("SecondStat channel is full, dropping message",
+						"symbol", symbol,
+						"price", price)
+				}
 			}
-			select {
-			case <-ctx.Done():
-				slog.Info(
-					"Got Interruption signal, stopping to receiving messages from MiniTicker chan",
-				)
-				return
-			default:
-				outChan <- secondStat
-			}
+			// Clear the map after sending (optional - we could keep accumulating)
+			// latestPrices = make(map[string]float64)
 		}
 	}
 }

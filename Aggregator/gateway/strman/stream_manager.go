@@ -36,21 +36,58 @@ func (sm *StreamManager) AddCoin(
 
 	symbol = strings.ToLower(symbol)
 
+	// Check if user is already subscribed
 	if slices.Contains(sm.Followers[symbol], userID) {
-		return false
+		slog.Info(
+			"User already subscribed to coin, allowing re-subscription",
+			"symbol",
+			symbol,
+			"userID",
+			userID,
+		)
+		// Allow re-subscription - user might have disconnected and reconnected
+		return true
 	}
 
-	if len(sm.Followers[symbol]) == 0 {
+	existingFollowers := len(sm.Followers[symbol])
+	sm.Followers[symbol] = append(sm.Followers[symbol], userID)
+
+	// Check if stream exists and is active
+	_, streamExists := sm.streams[symbol]
+
+	if !streamExists {
+		// Stream doesn't exist - need to start it
+		if existingFollowers == 0 {
+			slog.Info("First subscriber, starting new stream", "symbol", symbol, "userID", userID)
+		} else {
+			slog.Info("Stream was stopped, restarting for existing followers",
+				"symbol", symbol,
+				"userID", userID,
+				"total_followers", len(sm.Followers[symbol]))
+		}
 		sm.start(ctxParent, wg, symbol, outChan)
 		slog.Info("Stream started", "symbol", symbol)
+	} else {
+		// Stream already exists - just add subscriber
+		slog.Info("Adding subscriber to existing stream",
+			"symbol", symbol,
+			"userID", userID,
+			"existing_followers", existingFollowers,
+			"total_followers", len(sm.Followers[symbol]),
+			"stream_exists", true)
 	}
 
-	sm.Followers[symbol] = append(sm.Followers[symbol], userID)
-	slog.Info("User added to coin", "symbol", symbol, "userID", userID)
-	fmt.Println("StreamManager state after AddCoin:", sm.Followers)
+	slog.Info(
+		"User added to coin",
+		"symbol",
+		symbol,
+		"userID",
+		userID,
+		"total_followers",
+		len(sm.Followers[symbol]),
+	)
 	return true
 }
-
 func (sm *StreamManager) start(
 	ctxParent context.Context,
 	wg *sync.WaitGroup,
@@ -65,10 +102,25 @@ func (sm *StreamManager) start(
 		defer wg.Done()
 		defer func() {
 			sm.mu.Lock()
-			delete(sm.streams, symbol)
-			delete(sm.Followers, symbol)
+			// Only clean up if there are no followers left
+			// This prevents race condition where stream restarts but followers list is cleared
+			if len(sm.Followers[symbol]) == 0 {
+				delete(sm.streams, symbol)
+				delete(sm.Followers, symbol)
+				slog.Info(
+					"Stream processing stopped and cleaned up (no followers)",
+					"symbol",
+					symbol,
+				)
+			} else {
+				// Stream stopped but there are still followers - remove cancel func but keep followers
+				// This allows stream to restart if needed
+				delete(sm.streams, symbol)
+				slog.Warn("Stream processing stopped but followers remain, will restart on next message",
+					"symbol", symbol,
+					"followers", sm.Followers[symbol])
+			}
 			sm.mu.Unlock()
-			slog.Warn("Stream processing stopped and cleaned up", "symbol", symbol)
 		}()
 		converting.ReceiveAggTradeMessage(ctx, symbol, outChan)
 	}()
@@ -96,9 +148,7 @@ func (sm *StreamManager) DeleteCoin(symbol string, userID int) {
 	if len(sm.Followers[symbol]) == 0 {
 		if cancel, exists := sm.streams[symbol]; exists {
 			cancel()
-			delete(sm.streams, symbol)
-			delete(sm.Followers, symbol)
-			slog.Info("Stream stopped and deleted due to no followers", "symbol", symbol)
+			slog.Info("Stream cancellation signal sent", "symbol", symbol)
 		}
 	}
 }

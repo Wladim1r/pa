@@ -27,12 +27,12 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	wg := new(sync.WaitGroup)
 
-	rawMsgsChan := make(chan []byte, 300)
+	rawMsgsChan := make(chan []byte, 5000)
 
-	rawAggTradeChan := make(chan []byte, 100)
-	rawMiniTickerChan := make(chan []byte, 100)
+	rawAggTradeChan := make(chan []byte, 1000)
+	rawMiniTickerChan := make(chan []byte, 1000)
 
-	secondStatChan := make(chan models.SecondStat, 100)
+	secondStatChan := make(chan models.SecondStat, 500)
 	dailyStatChan := make(chan models.DailyStat, 500)
 	// kafkaMsgChan := make(chan models.KafkaMsg, 500)
 
